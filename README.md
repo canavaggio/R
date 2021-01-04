@@ -1,5 +1,5 @@
 # R
-Some of my shiny app project :
+Some of my shiny app projects :
 
 If you're interesting by a notebook or code about shiny app or R ou can follow my account and I'll update some ;) 
 
