@@ -1,0 +1,357 @@
+---
+title: "Processing Large Dataset with R"
+author: "Charles Canavaggio"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+---
+
+# Why are low quality diamonds more expensive ? 
+
+##### Library used
+```{r packages, warning = F, message= F}
+library(tidyverse)
+library(ggplot2)
+library(nycflights13)
+library(lubridate)
+```
+
+##### Data Dictionnary
+
+| Variable |                                                                                                   |
+| -------- | ------------------------------------------------------------------------------------------------- |
+| Price    | price in US dollars (\$326–\$18,823)                                                              |
+| Carat    | weight of the diamond (0.2–5.01)                                                                  |
+| Cut      | quality of the cut (Fair, Good, Very Good, Premium, Ideal)                                        |
+| Color    | diamond color, from D (best) to J (worst)                                                         |
+| Clarity  | a measurement of how clear the diamond is (I1 (worst), SI2, SI1, VS2, VS1, VVS2, VVS1, IF (best)) |
+| x        | length in mm (0–10.74)                                                                            |
+| y        | width in mm (0–58.9)                                                                              |
+| z        | depth in mm (0–31.8)                                                                              |
+| Depth    | total depth percentage = z / mean(x, y) = 2 * z / (x + y) (43–79)                                 |
+| Table    | width of top of diamond relative to widest point (43–95)                                          |
+
+##### Load dataset diamonds from ggplot2 and show summary
+```{r summary , echo = F}
+
+diamonds <- ggplot2::diamonds
+knitr::kable(
+  summary(diamonds)
+)
+```
+
+##### How many variables ? 
+```{r variables, echo = F}
+variables_number <- length(colnames(diamonds))
+print(paste("The dataset contains ",variables_number," variables"))
+```
+
+##### Let's keep exploring the dataset and only display data from the diamonds dataset that have a cut value of Fair
+```{r}
+diamonds %>% 
+  filter(cut == 'Fair')
+```
+
+##### Only display data from diamonds that have a cut value of Fair or Good and a price at or under $600
+```{r}
+diamonds %>%
+  filter((cut == 'Fair' | cut == 'Good') & price <= 600 )
+```
+
+##### Calculate the mean price of all the diamonds
+```{r}
+moyenne <- diamonds %>%
+  summarize(mean(price))
+moyenne <- round(moyenne, digits = 2)
+print(paste('The mean price of all the diamonds is ', moyenne, '$'))
+```
+
+##### Groups data by color and clarity variables
+```{r}
+diamonds %>%
+  group_by(color, clarity)
+```
+
+##### Creates new variable ( average price by groups)
+```{r}
+diamonds %>%
+  group_by(color, clarity) %>%
+  transmute(average_price_by_group = mean(price))
+```
+
+##### Visualize data ordered by color
+```{r}
+diamonds %>% 
+  arrange(color)
+```
+
+##### Count the numbers of values for each cut and color
+```{r}
+diamonds %>%
+  count(cut, color)
+```
+
+##### Calculate the means for each clarity category of diamonds and plot it
+```{r, warning=F,message=F}
+diamonds %>%
+  group_by(clarity) %>%
+  summarize(mean = mean(price)) %>%
+  ggplot() +
+  geom_point(aes(x = clarity, y = mean, color= mean)) +
+  ylab('dollars') +
+  xlab('diamonds clarity') +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ggtitle('Average price of diamonds by Clarity')
+```
+
+##### Create boxplots to show the relationship between quality of diamonds (cut, color, clarity) and price. What can you conclude ? 
+
+```{r}
+diamonds %>% ggplot() +
+  geom_boxplot(aes(cut,price)) +
+  ylab('price in $') +
+  xlab('quality of the cut') 
+```
+
+On this boxplot, we can observe a slightly negative trend on the median price of the quality of the diamonds. Except for the premium quality.
+
+
+```{r}
+diamonds %>% ggplot() +
+  geom_boxplot(aes(color, price)) +
+  ylab('price in $') +
+  xlab('diamonds color from D (best) to J (worst)')
+```
+
+On this boxplot, we can observe a slightly negative trend on the median price of the quality of the diamonds. Except for the premium quality.
+
+
+```{r}
+diamonds %>% ggplot() +
+  geom_boxplot(aes(clarity, price)) +
+  ylab('price in $') +
+  xlab('measurement of how clear the diamond is (I1 (worst), SI2, SI1, VS2, VS1, VVS2, VVS1, IF (best))')
+```
+
+On this boxplot, we can observe a negative trend between the median price of the diamonds and there measurement. 
+
+
+##### Let's focus on the relationship between the weight(carat) and the price.
+   a. Focus on diamonds smaller than 2.5 carats (99.7 % of the data)
+   b. Log-transform the carat and price variables.
+   
+   Then plot the relationship. What do you observe ?
+
+The log transformation is really useful cause it makes the pattern linear.   
+On the scatter plot, we can observe a positive linear correlation between the price and the carat. 
+
+```{r}
+log_data <- diamonds %>%
+  filter(carat <= 2.5) %>%
+  mutate(logprice = log(price), logcarat = log(carat))
+
+log_data %>%
+  ggplot() +
+  geom_point(aes(x = logcarat, y = logprice), alpha = 0.05) +
+  xlab('log transformation of carat') +
+  ylab('log transformation of price (in $)') +
+  ggtitle('scatter plot of log transformation between carat and price ')
+```
+
+##### To see how the other attributes of a diamond affect its relative price by fitting a model to separate out the effect of carat
+```{r, error = F, message = F}
+log_data <- diamonds %>%
+  filter(carat <= 2.5) %>%
+  mutate(logprice = log(price), logcarat = log(carat))
+
+model <- lm(logprice ~ logcarat, data = log_data)
+
+log_data$pred <- predict(model)
+
+ggplot(log_data,aes(x = carat, y = price)) +
+  geom_point() +
+  geom_smooth(aes(y = exp(pred)))
+
+```
+We can observe that the large diamonds are less expensive than the small one.
+
+# What affects the number of daily flights ? 
+
+##### Data Dictionnary
+
+| Variable                        |                                                                            |
+| --------------------------------| -------------------------------------------------------------------------- |
+| year, month, day                | Data of departure                                                          |
+| dep_time, arr_time              | Actual departure and arrival times ( format HHMM or HMM), local tz         |
+| sched_dep_time, sched_arr_time  | Scheduled departure and arrival times ( format HHMM or HMM), local tz      |
+| dep_delay, arr_delay | Departures and arrival delays, in minutes. Negative times represent early departures/arrivals |
+| carrier                         | Two letter carrier abbreviation.                                           |
+| flight                          | Flight  number                                                             |
+| tailnum                         | Plane tail number                                                          |
+| origin, dest                    | Origin and destination                                                     |
+| air_time                        | Amount of time spent in the air, in minutes                                |
+| distance                        | Distance between airports, in miles                                        |
+| hour, minute                    | Time of scheduled departure broken into hour and minutes                   |
+| time_hour                       | Scheduled date and hour of the flight as a POSIXct date. Along with origin, can be used to join flights data to weather data |
+
+##### load the dataset from nycflights13 library
+```{r  , echo = F}
+flights <- nycflights13::flights
+
+```
+
+##### Let's first explore the dataset
+```{r}
+knitr::kable(
+  summary(flights)
+)
+```
+
+##### Select the destination, duration and distance columns (dest, dep_time, distance)
+```{r}
+data <- flights %>%
+  select(dest, dep_time, distance)
+```
+
+##### Add the arrival delay(arr_delay) and departure delay(dep_delay) columns as well
+```{r}
+data <- bind_cols(data, arr_delay = flights$arr_delay, dep_delay = flights$dep_delay)
+```
+
+##### flights to Boston (BOS):
+```{r}
+data %>%
+  filter(dest == 'BOS')
+```
+
+##### Are significant parts of certain columns simply missing ? 
+```{r}
+for( i in colnames(data)){
+  if ( sum(is.na(data[[i]])) >= 2){
+      print(paste("There are ", sum(is.na(data[[i]])), "missing values in the column",i))
+  } else {
+      print(paste("There are ", sum(is.na(data[[i]])), "missing value in the column",i))
+  }
+}
+```
+
+##### Make histograms to see the frequency and time delays in minutes of flight arrivals and departures. What do you observe ? 
+```{r,  message = F, warning = F}
+data %>%
+  ggplot() +
+  geom_histogram(aes(x = dep_delay,stat(density)))
+
+data %>%
+  ggplot() +
+  geom_histogram(aes(x = arr_delay,stat(density)))
+```
+
+We can observe on the histograms that , there not a lot of dalayed flights.
+
+##### Now classify flights as either on time or delayed assuming any flight witha departure delay of mare than 5 minutes as delayed. Let's look at this by month
+```{r,message = F, error = F}
+data <- flights %>%
+  mutate(tmp = ifelse(dep_delay < 5, 'on time', 'delayed')) %>%
+  group_by(month) %>%
+  summarise(delayed = sum(tmp== 'delayed', na.rm = T), on_time = sum(tmp == 'on time', na.rm = T))
+
+knitr::kable(
+  data
+)
+```
+
+
+##### Plot a bar chart showing delays and on-time arrivals each month
+```{r, error = F, message = F}
+
+flights %>%
+  mutate(delay = ifelse(dep_delay < 5, 'on time', 'delayed')) %>%
+  group_by(month) %>%
+  ggplot(aes(x = month, fill = delay)) +
+  geom_bar(position = 'dodge') +
+  scale_x_discrete(limits =c('january','february', 'march','april','may', 'june',  'jully','august','september','october', 'november','december')) +
+  theme(axis.text.x = element_text(angle = 45))
+  
+
+```
+##### Let's count the number of flight per day and visualising it with ggplot2
+```{r, warning = F, error= F, message = F}
+flights %>%
+  mutate(date = make_date(year, month, day)) %>%
+  group_by(date) %>%
+  summarize(flight_number = n())
+
+flights %>%
+  mutate(date = make_date(year, month, day)) %>%
+  group_by(date) %>%
+  summarize(flight_number = n()) %>%
+  ggplot() +
+  geom_line(aes(date, flight_number))
+
+
+```
+
+##### Plot the distribution of flight numbers by day-of-week. Why there are less flights the week-end ?
+```{r, error = F, message = F}
+flights %>%
+  mutate(date = make_date(year, month, day)) %>%
+  group_by(date) %>%
+  summarize(flight_number = n()) %>%
+  mutate(wday = wday(date, label = TRUE)) %>%
+  ggplot(aes(wday, flight_number)) +
+  geom_boxplot()
+```
+
+We can observe, that there really low flights's number saturday. It is explain by two reasons. First, most of the people flying during the week are business flight. Then let's say you book a trip for the weekend usually you left friday night/ satudray morning and then you came back sunday. 
+
+##### Focus on saturdays and plot the number of flights over the year. Do you observe any pattern ? Why are there more Saturday flights in the Spring than the Fall ? 
+```{r, message = F, error = F, warning = F}
+data <- flights %>%
+  mutate(date = make_date(year, month, day)) %>%
+  group_by(date) %>%
+  summarize(flight_number = n()) %>%
+  mutate(wday = wday(date, label = TRUE))
+
+data %>%
+  filter(wday == "sam\\.") %>%
+  ggplot() +
+  geom_point(aes(x = date, y =flight_number)) +
+  geom_line(aes(x = date, y =flight_number))
+```
+
+We can observe that, during the period between june and august there are  a higher number of flight, it coul be be due to the summer vacation. And we can also notice a peack around december which can be due to christmas vacation where family usually meet, when they live in different area.
+
+##### Let's create a "term" variable that roughly captures the three school terms, check with a plot the three school terms : 
+- 01/01 - 26/07 : Spring
+- 27/07 - 09/09 : Summer
+- 10/09 - 31/12 : fall
+```{r}
+data %>%
+  mutate(term = case_when(
+  date  <= "2013-07-26" ~ "Spring", 
+  date <= "2013-09-29" ~ 'summer',
+  date<= "2013-12-31" ~ 'fall'
+  )) %>%
+  filter(wday == "sam\\.") %>%
+  ggplot() +
+    geom_point(aes(x = date, y =flight_number, col = term)) +
+  geom_line(aes(x = date, y =flight_number, col = term))
+  
+```
+
+
+##### See how this new variable affects the other days of the week : 
+```{r}
+data %>%
+  mutate(term = case_when(
+  date  <= "2013-07-26" ~ "Spring", 
+  date <= "2013-09-29" ~ 'summer',
+  date<= "2013-12-31" ~ 'fall'
+  )) %>%
+  ggplot(aes(wday, flight_number, color = term)) +
+  geom_boxplot()
+```
+
+We can observe a significant variation between the different term.
